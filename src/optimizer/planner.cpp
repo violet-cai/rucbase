@@ -23,11 +23,17 @@ See the Mulan PSL v2 for more details. */
 #include "record_printer.h"
 
 // 目前的索引匹配规则为：完全匹配索引字段，且全部为单点查询，不会自动调整where条件的顺序
+// 修改成多点查询，且对index_col_names进行查重
 bool Planner::get_index_cols(std::string tab_name, std::vector<Condition> curr_conds, std::vector<std::string>& index_col_names) {
     index_col_names.clear();
+    std::unordered_set<std::string> inserted_cols;
     for(auto& cond: curr_conds) {
-        if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
+        // if(cond.is_rhs_val && cond.op == OP_EQ && cond.lhs_col.tab_name.compare(tab_name) == 0)
+        if(cond.is_rhs_val && cond.lhs_col.tab_name.compare(tab_name) == 0
+            && inserted_cols.count(cond.lhs_col.col_name)==0){
             index_col_names.push_back(cond.lhs_col.col_name);
+            inserted_cols.insert(cond.lhs_col.col_name);
+        }
     }
     TabMeta& tab = sm_manager_->db_.get_table(tab_name);
     if(tab.is_index(index_col_names)) return true;

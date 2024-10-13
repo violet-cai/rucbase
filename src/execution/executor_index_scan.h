@@ -63,18 +63,124 @@ class IndexScanExecutor : public AbstractExecutor {
         }
         fed_conds_ = conds_;
     }
-
+    
+    // index_scan和seq_scan在这里的逻辑应该是一样的
+    // 二者的主要区别应该在ix_scan和rm_scan里next的实现上
+    // 外部接口的差别在于scan_的初始化上
     void beginTuple() override {
-        
+        auto ih_ = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_,index_col_names_)).get();
+        // find lower & upper for ixscan, using ix_manager's lower & upper
+        // lower iid指向第一个有效的rid
+        // upper end指向末尾
+        Iid lower = ih_->leaf_begin();
+        Iid upper = ih_->leaf_end();
+        scan_ = std::make_unique<IxScan>(ih_,lower,upper,sm_manager_->get_bpm());
+        if(scan_->is_end()){
+            return ;
+        }
+        for(;!scan_->is_end();scan_->next()){
+            rid_ = scan_->rid();
+            auto cur_record_ptr = fh_->get_record(rid_,context_);
+            if(check_conds(cur_record_ptr.get())){
+                break;
+            }
+        }
+        return;
     }
 
     void nextTuple() override {
-        
+        if(scan_->is_end()){
+            return;
+        }
+        for(scan_->next();!scan_->is_end();scan_->next()){
+            rid_ = scan_->rid();
+            auto cur_record_ptr = fh_->get_record(rid_,context_);
+            if(check_conds(cur_record_ptr.get())){
+                break;
+            }
+        }
     }
 
     std::unique_ptr<RmRecord> Next() override {
-        return nullptr;
+        return fh_->get_record(rid_,context_);
     }
 
     Rid &rid() override { return rid_; }
+
+    size_t tupleLen() const {return len_;}
+
+    bool check_conds(RmRecord* record_ptr){
+        int len = fed_conds_.size();
+        if(len == 0)
+            return true;
+        bool found = check_cond(fed_conds_[0],record_ptr);
+        for(int i=1;i<len;i++){
+            found &= check_cond(fed_conds_[i],record_ptr);
+            if(!found)
+                return false;
+        }
+        return found;
+    }
+
+    bool check_cond(Condition cond_, RmRecord* cur_record_ptr){
+        // 1. 获取被比较的左列值
+        auto left_col_it = get_col(cols_,cond_.lhs_col);
+        char* left_val = cur_record_ptr->data + left_col_it->offset;
+        int len = left_col_it->len;
+        // 2. 检查右列是否是常值，并获取相应的列值/常值
+        char* right_val;
+        ColType col_type;
+        if(cond_.is_rhs_val){
+            // 常值
+            Value right_value = cond_.rhs_val;
+            right_val = right_value.raw->data;
+            col_type = right_value.type;
+        }
+        else{
+            // 同左值
+            auto right_col_it = get_col(cols_,cond_.rhs_col);
+            right_val = cur_record_ptr->data + right_col_it->offset;
+            col_type = right_col_it->type;
+        }
+        // 3. 根据比较条件判断true false
+        int cmp = ix_compare(left_val,right_val,col_type,len);
+        bool found;
+        switch(cond_.op){
+            // OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE
+            case OP_EQ:
+            {
+                found = (cmp==0);
+                break;
+            }
+            case OP_NE:
+            {
+                found = (cmp!=0);
+                break;
+            }
+            case OP_LT:{
+                found = (cmp==-1);
+                break;
+            }
+            case OP_GT:{
+                found = (cmp==1);
+                break;
+            }
+            case OP_LE:{
+                found = (cmp!=1);
+                break;
+            }
+            case OP_GE:{
+                found = (cmp!=-1);
+                break;
+            }
+        }
+        return found;
+    }
+
+    const std::vector<ColMeta> &cols() const {
+        // std::vector<ColMeta> *_cols = nullptr;
+        return cols_;
+    };
+
+    bool is_end() const { return scan_->is_end(); };
 };

@@ -9,6 +9,7 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "lru_replacer.h"
+#include <algorithm>
 
 LRUReplacer::LRUReplacer(size_t num_pages) { max_size_ = num_pages; }
 
@@ -27,8 +28,16 @@ bool LRUReplacer::victim(frame_id_t* frame_id) {
     // Todo:
     //  利用lru_replacer中的LRUlist_,LRUHash_实现LRU策略
     //  选择合适的frame指定为淘汰页面,赋值给*frame_id
-
-    return true;
+    if(LRUlist_.empty()){
+        frame_id = nullptr;
+        return false;
+    }
+    else{
+        *frame_id = LRUlist_.back();
+        LRUlist_.pop_back();
+        LRUhash_.erase(*frame_id);
+        return true;
+    }
 }
 
 /**
@@ -40,6 +49,11 @@ void LRUReplacer::pin(frame_id_t frame_id) {
     // Todo:
     // 固定指定id的frame
     // 在数据结构中移除该frame
+    if(std::find(LRUlist_.begin(), LRUlist_.end(), frame_id) != LRUlist_.end()){
+        LRUlist_.erase(LRUhash_[frame_id]);
+        LRUhash_.erase(frame_id);
+    }
+    return;
 }
 
 /**
@@ -50,6 +64,19 @@ void LRUReplacer::unpin(frame_id_t frame_id) {
     // Todo:
     //  支持并发锁
     //  选择一个frame取消固定
+
+    // std::scoped_lock lock{latch_}; //悲观锁
+
+    if(std::find(LRUlist_.begin(), LRUlist_.end(), frame_id) == LRUlist_.end()){
+        // 如果该frame已经是unpin状态，就不需要再更新
+        std::list<frame_id_t>::iterator it;
+        {
+            std::unique_lock<std::mutex> lock(latch_);
+            it = LRUlist_.insert(LRUlist_.begin(), frame_id);
+            LRUhash_[frame_id] = it;
+        }
+    }
+    return ;
 }
 
 /**

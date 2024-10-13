@@ -18,9 +18,9 @@ See the Mulan PSL v2 for more details. */
 class ProjectionExecutor : public AbstractExecutor {
    private:
     std::unique_ptr<AbstractExecutor> prev_;        // 投影节点的儿子节点
-    std::vector<ColMeta> cols_;                     // 需要投影的字段
+    std::vector<ColMeta> cols_;                     // 需要投影的字段 me:投影结束以后的colMeta串
     size_t len_;                                    // 字段总长度
-    std::vector<size_t> sel_idxs_;                  
+    std::vector<size_t> sel_idxs_;                  // me: 被选择的列在提取前的index（第几列）
 
    public:
     ProjectionExecutor(std::unique_ptr<AbstractExecutor> prev, const std::vector<TabCol> &sel_cols) {
@@ -39,13 +39,43 @@ class ProjectionExecutor : public AbstractExecutor {
         len_ = curr_offset;
     }
 
-    void beginTuple() override {}
+    size_t tupleLen() const { return len_; };
 
-    void nextTuple() override {}
+    void beginTuple() override {
+        // 递归begin孩子
+        prev_->beginTuple();
+    }       
+
+    void nextTuple() override {
+        // 目的：调用儿子节点的next
+        prev_->nextTuple();
+    }
 
     std::unique_ptr<RmRecord> Next() override {
-        return nullptr;
+        // 提取出对应列的数据，组装成一条新的记录，返回给上层
+        auto child_rec = prev_->Next();
+        auto ret_rec = std::make_unique<RmRecord>(len_);
+        int sel_num = sel_idxs_.size();
+        auto prev_cols = prev_->cols();
+
+        for(int i=0;i<sel_num;i++){
+            // 对于cols_里的每一列，需要找到它在child_rec里的offset、len，以及它未来在ret_rec里的offset，并使用memcpy进行复制
+            ColMeta prev_col = prev_cols[sel_idxs_[i]];
+            ColMeta cur_col = cols_[i];
+            char* prev_val = child_rec->data+prev_col.offset;
+            char* cur_val = ret_rec->data + cur_col.offset;
+            int len = prev_col.len;
+            memcpy(cur_val,prev_val,len);
+        }
+        return ret_rec;
     }
 
     Rid &rid() override { return _abstract_rid; }
+
+    const std::vector<ColMeta> &cols() const {
+        // std::vector<ColMeta> *_cols = nullptr;
+        return cols_;
+    };
+
+    bool is_end() const { return prev_->is_end(); };
 };
