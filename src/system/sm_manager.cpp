@@ -71,27 +71,29 @@ void SmManager::create_db(const std::string& db_name) {
  * @param {string&} db_name 数据库名称，与文件夹同名
  */
 void SmManager::drop_db(const std::string& db_name) {
+    // ! dbj1013 TODO
+    // 参考open_db()，使用drop_index，drop_table
+    // 查看是否db是否还在
     if (!is_dir(db_name)) {
         throw DatabaseNotFoundError(db_name);
     }
-    if (chdir(db_name.c_str()) < 0) {
-        throw UnixError();
-    }
-    std::ifstream ofs(DB_META_NAME);
-    ofs >> db_;
-    for (auto table = db_.tabs_.begin(); table != db_.tabs_.end(); table++) {
+    for (auto table = db_.tabs_.begin(); table != db_.tabs_.end();) {
         std::string tab_name = table->first;
-        fhs_.erase(table->first);
-
         TabMeta tab_meta = table->second;
         for (auto index : tab_meta.indexes) {
-            ihs_.erase(table->first);
+            // 这里应该可以使用nullptr代替context，因为drop_db没有context，可能不需要跨数据库？可能不考虑分布式数据库
+            drop_index(tab_name, index.cols, nullptr);
         }
+        drop_table(tab_name, nullptr);
     }
+    // cmd删除对应表文件夹
     std::string cmd = "rm -r \"" + db_name + "\"";
     if (system(cmd.c_str()) < 0) {
         throw UnixError();
     }
+    // 清空数据库
+    db_.name_ = "";
+    db_.tabs_.clear();
 }
 
 /**

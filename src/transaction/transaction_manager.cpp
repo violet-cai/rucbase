@@ -81,32 +81,46 @@ void TransactionManager::commit(Transaction* txn, LogManager* log_manager) {
  */
 void TransactionManager::abort(Transaction* txn, LogManager* log_manager) {
     // TODO 1.:
+    // 参考commit()
     // 0. 给txn_map_上锁
     std::scoped_lock lock{latch_};
     if (!txn) {
         return;
     }
     // 1. 回滚所有写操作
+    // 获取写操作集合
     auto write_set = txn->get_write_set();
+    // 获取写操作上下文信息（锁、日志、事务）
     auto* context = new Context(lock_manager_, log_manager, txn);
     for (auto iter = write_set->rbegin(); iter != write_set->rend(); ++iter) {
+        // 获取操作类型
         auto& type = (*iter)->GetWriteType();
+        // 获取record id
         auto& rid = (*iter)->GetRid();
+        // buf记录的是对应的操作被修改的数据
         auto buf = (*iter)->GetRecord().data;
+        // 文件句柄
         auto fh = sm_manager_->fhs_.at((*iter)->GetTableName()).get();
+        // 根据不同操作对内容回滚
         switch (type) {
             case WType::INSERT_TUPLE:
+                // insert就直接删除
                 fh->delete_record(rid, context);
                 break;
             case WType::DELETE_TUPLE:
+                // delete就重新插回去
                 fh->insert_record(buf, context);
                 break;
             case WType::UPDATE_TUPLE:
+                // update就把对应的内容更新回去
                 fh->update_record(rid, buf, context);
                 break;
         }
     }
+    // 清空写操作集合
     write_set->clear();
+    // 释放内存
+    delete context;
     // 2. 释放所有锁
     auto lock_set = txn->get_lock_set();
     if (!lock_set->empty()) {
