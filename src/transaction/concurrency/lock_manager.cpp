@@ -77,7 +77,6 @@ bool LockManager::lock_exclusive_on_record(Transaction* txn, const Rid& rid, int
         throw TransactionAbortException(txn->get_transaction_id(), AbortReason::LOCK_ON_SHIRINKING);
         return false;
     } else if (txn_stat == TransactionState::ABORTED || txn_stat == TransactionState::COMMITTED) {
-        // 事务已经回滚/提交
         return false;
     }
     txn->set_state(TransactionState::GROWING);
@@ -86,6 +85,7 @@ bool LockManager::lock_exclusive_on_record(Transaction* txn, const Rid& rid, int
     // 弱锁标记
     bool weaker_found = false;
     std::list<LockRequest>::iterator weaker_it;
+    bool x_found = false;
     for (auto it = lock_table_[rec_lockID].request_queue_.begin(); it != lock_table_[rec_lockID].request_queue_.end();
          ++it) {
         if (it->txn_id_ != txn->get_transaction_id()) {
@@ -94,12 +94,15 @@ bool LockManager::lock_exclusive_on_record(Transaction* txn, const Rid& rid, int
             return false;
         } else {
             if (it->lock_mode_ == LockMode::EXLUCSIVE) {
-                return true;
+                x_found = true;
             } else {
                 weaker_found = true;
                 weaker_it = it;
             }
         }
+    }
+    if (x_found) {
+        return true;
     }
     if (weaker_found) {
         weaker_it->lock_mode_ = LockMode::EXLUCSIVE;
@@ -108,12 +111,10 @@ bool LockManager::lock_exclusive_on_record(Transaction* txn, const Rid& rid, int
     }
     // 获取事务锁集
     auto txn_locks = txn->get_lock_set();
-    // 事务锁
     txn_locks->insert(rec_lockID);
     LockRequest lock_request = LockRequest(txn->get_transaction_id(), LockMode::EXLUCSIVE);
     lock_request.granted_ = true;
     lock_table_[rec_lockID].request_queue_.push_back(lock_request);
-    // 重复了？
     if (lock_table_[rec_lockID].group_lock_mode_ < GroupLockMode::X) {
         lock_table_[rec_lockID].group_lock_mode_ = GroupLockMode::X;
     }

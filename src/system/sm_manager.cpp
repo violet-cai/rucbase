@@ -81,17 +81,15 @@ void SmManager::drop_db(const std::string& db_name) {
         std::string tab_name = table->first;
         TabMeta tab_meta = table->second;
         for (auto index : tab_meta.indexes) {
-            // 这里应该可以使用nullptr代替context，因为drop_db没有context，可能不需要跨数据库？可能不考虑分布式数据库
+            // 这里应该可以使用nullptr代替context，因为drop_db没有context，可能不需要跨数据库
             drop_index(tab_name, index.cols, nullptr);
         }
         drop_table(tab_name, nullptr);
     }
-    // cmd删除对应表文件夹
     std::string cmd = "rm -r \"" + db_name + "\"";
     if (system(cmd.c_str()) < 0) {
         throw UnixError();
     }
-    // 清空数据库
     db_.name_ = "";
     db_.tabs_.clear();
 }

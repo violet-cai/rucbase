@@ -57,24 +57,17 @@ class DeleteExecutor : public AbstractExecutor {
             fh_->delete_record(rid, context_);
         }
 
-        // 2. 如果表上存在索引，将record对象插入到相关索引文件中
-        // 遍历
+        // 2. 如果表上存在索引，删除相关索引文件
         for (size_t i = 0; i < tab_.indexes.size(); ++i) {
-            // 获取索引
             auto &index = tab_.indexes[i];
-            // 索引管理器
             auto ih = sm_manager_->ihs_.at(sm_manager_->get_ix_manager()->get_index_name(tab_name_, index.cols)).get();
-            // 索引键值
             char *key = new char[index.col_tot_len];
             int offset = 0;
-            // 分配内存
             for (size_t i = 0; i < index.col_num; ++i) {
                 memcpy(key + offset, rec.data + index.cols[i].offset, index.cols[i].len);
                 offset += index.cols[i].len;
             }
-            // 删除key索引条目
             ih->delete_entry(key, context_->txn_);
-            // 释放空间
             delete[] key;
         }
 
